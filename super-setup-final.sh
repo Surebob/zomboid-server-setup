@@ -2,12 +2,11 @@
 #
 # ================================================================= #
 #       PROJECT ZOMBOID - APE TOGETHER STRONK SUPER SCRIPT      #
-#                 (Ape King Edition - Bigger Hammer)              #
+#            ("God-Emperor Ape" Edition - Final Logic)            #
 # ================================================================= #
-# This script handles the complete setup and systemd integration    #
-# with FIFO support. It pre-configures memory and handles           #
-# non-interactive prompts and aggressively cleans up broken         #
-# package dependencies before installation.                         #
+# This script handles the complete setup by following the precise   #
+# order of operations required to reliably pre-accept the Steam     #
+# license agreement on all Ubuntu versions. APE WILL PREVAIL.       #
 # ================================================================= #
 
 # --- Script Configuration ---
@@ -28,7 +27,7 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-echo -e "${BLUE}--- Starting Project Zomboid Server Super Setup (Ape King Mode) ---${NC}"
+echo -e "${BLUE}--- Starting Project Zomboid Server Super Setup (God-Emperor Mode) ---${NC}"
 
 # --- Wait for any existing apt processes to finish ---
 while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 ; do
@@ -43,28 +42,28 @@ export DEBIAN_FRONTEND=noninteractive
 echo -e "${BLUE}[2/9] Updating package lists...${NC}"
 apt-get update -y
 
-# --- THE BIGGER HAMMER: Forcefully clean up any broken state ---
-echo -e "${BLUE}[3/9] Forcefully cleaning up package manager state...${NC}"
+# --- 3. Fix any pre-existing broken dependencies ---
+echo -e "${BLUE}[3/9] Attempting to fix any broken dependencies...${NC}"
 apt-get --fix-broken install -y
-# Find any leftover i386 packages and purge them
-dpkg -l | grep i386 | awk '{print $2}' | xargs sudo apt-get remove --purge --allow-remove-essential -y || echo "No leftover i386 packages to remove, or cleanup failed."
 
-echo -e "${BLUE}[4/9] Preparing system and installing core dependencies...${NC}"
+# --- 4. Prepare System for SteamCMD ---
+echo -e "${BLUE}[4/9] Preparing system architecture and repositories for SteamCMD...${NC}"
 apt-get install -y software-properties-common
-add-apt-repository multiverse -y
 dpkg --add-architecture i386
+add-apt-repository multiverse -y
+# CRITICAL: Update *after* adding new architecture and repos
 apt-get update -y
 echo -e "${GREEN}System preparation complete.${NC}"
 
-# --- 5. SteamCMD Installation ---
-echo -e "${BLUE}[5/9] Installing SteamCMD...${NC}"
+# --- 5. SteamCMD Installation (Correct Order) ---
+echo -e "${BLUE}[5/9] Pre-accepting Steam License and Installing SteamCMD...${NC}"
+# CRITICAL: Set debconf selections *after* apt knows about the i386 packages
 echo "steam steam/question select \"I AGREE\"" | debconf-set-selections
 echo "steam steam/license note ''" | debconf-set-selections
 apt-get install -y steamcmd
-
 # Add a check to see if steamcmd actually installed
 if ! command -v /usr/games/steamcmd &> /dev/null; then
-    echo -e "${YELLOW}FATAL ERROR: SteamCMD installation failed. Exiting.${NC}"
+    echo -e "${YELLOW}FATAL ERROR: SteamCMD installation failed. Please check the logs above.${NC}"
     exit 1
 fi
 echo -e "${GREEN}SteamCMD installed successfully.${NC}"

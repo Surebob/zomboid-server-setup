@@ -2,10 +2,11 @@
 #
 # ================================================================= #
 #       PROJECT ZOMBOID - APE TOGETHER STRONK FINAL SUPER SCRIPT      #
+#                 (Verbose & Robust Edition)                          #
 # ================================================================= #
 # This single script handles the complete setup and optional        #
-# systemd integration with FIFO support for a Project Zomboid       #
-# dedicated server.                                                 #
+# systemd integration with full FIFO support for a Project Zomboid  #
+# dedicated server. It shows all installation and download output.  #
 # ================================================================= #
 
 # --- Script Configuration ---
@@ -25,37 +26,38 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-echo -e "${BLUE}--- Starting Project Zomboid Server Super Setup ---${NC}"
+echo -e "${BLUE}--- Starting Project Zomboid Server Super Setup (Verbose Mode) ---${NC}"
 
 # --- 1. System Preparation ---
 echo -e "${BLUE}[1/7] Preparing system and installing dependencies...${NC}"
 apt-get update
-apt-get install -y software-properties-common &>/dev/null
-add-apt-repository multiverse -y &>/dev/null
+apt-get install -y software-properties-common
+add-apt-repository multiverse -y
 dpkg --add-architecture i386
 apt-get update
 echo -e "${GREEN}System preparation complete.${NC}"
 
 # --- 2. SteamCMD Installation ---
-echo -e "${BLUE}[2/7] Installing SteamCMD...${NC}"
+echo -e "${BLUE}[2/7] Installing SteamCMD (this may take a moment)...${NC}"
+# Pre-accept the Steam license to avoid interactive prompts
 echo "steam steam/question select \"I AGREE\"" | debconf-set-selections
 echo "steam steam/license note ''" | debconf-set-selections
-apt-get install -y steamcmd &>/dev/null
+apt-get install -y steamcmd
 echo -e "${GREEN}SteamCMD installed.${NC}"
 
 # --- 3. Create Dedicated User & Directories ---
 echo -e "${BLUE}[3/7] Creating dedicated user ('$PZ_USER') and server directory...${NC}"
-if ! id "$PZ_USER" &>/dev/null; then
+if ! id "$PZ_USER" >/dev/null 2>&1; then
     useradd -m -s /bin/bash "$PZ_USER"
     echo "$PZ_USER:$PZ_PASSWORD" | chpasswd
-    adduser "$PZ_USER" sudo &>/dev/null
+    adduser "$PZ_USER" sudo
 fi
 mkdir -p "$PZ_SERVER_DIR"
 chown "$PZ_USER":"$PZ_USER" "$PZ_SERVER_DIR"
 echo -e "${GREEN}User and directory created.${NC}"
 
 # --- 4. Download Project Zomboid Server ---
-echo -e "${BLUE}[4/7] Downloading Project Zomboid server...${NC}"
+echo -e "${BLUE}[4/7] Downloading Project Zomboid server (this is the longest step)...${NC}"
 cat > "/home/$PZ_USER/update_zomboid.txt" <<EOL
 @ShutdownOnFailedCommand 1
 @NoPromptForPassword 1
@@ -65,7 +67,8 @@ app_update 380870 validate
 quit
 EOL
 chown "$PZ_USER":"$PZ_USER" "/home/$PZ_USER/update_zomboid.txt"
-sudo -u "$PZ_USER" /usr/games/steamcmd +runscript "/home/$PZ_USER/update_zomboid.txt" &>/dev/null
+# Run steamcmd as the dedicated user, showing all output
+sudo -u "$PZ_USER" /usr/games/steamcmd +runscript "/home/$PZ_USER/update_zomboid.txt"
 echo -e "${GREEN}Project Zomboid server downloaded.${NC}"
 
 # --- 5. Configure OS Firewall (iptables) ---
@@ -75,26 +78,23 @@ iptables -I INPUT 6 -p udp --dport 8766 -j ACCEPT
 iptables -I INPUT 7 -p udp --dport 16262:16272 -j ACCEPT
 echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | debconf-set-selections
 echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | debconf-set-selections
-apt-get install -y iptables-persistent &>/dev/null
-netfilter-persistent save &>/dev/null
+apt-get install -y iptables-persistent
+netfilter-persistent save
 echo -e "${GREEN}iptables rules applied and made persistent.${NC}"
 
 # --- 6. The Guided Manual First Run ---
 echo -e "${BLUE}[6/7] Starting server for initial password setup...${NC}"
 echo -e "${YELLOW}==================== ATTENTION REQUIRED ====================${NC}"
 echo -e "The server will now start. It is waiting for you to create a password for the 'admin' user."
-echo -e "${YELLOW}Please type your desired admin password below and press Enter. Then confirm it.${NC}"
+echo -e "Please type your desired admin password in the console below and press Enter. Then confirm it."
+echo -e "After the server fully starts (you'll see '*** SERVER STARTED ****'), stop it with Ctrl+C."
+echo -e "${YELLOW}Press Enter to continue when you are ready...${NC}"
+read
 
-# Manually create the FIFO file so the start-server.sh doesn't hang waiting for systemd
-sudo -u "$PZ_USER" mkfifo "${PZ_SERVER_DIR}/zomboid.control"
-
-# Launch the server in the background, making it interactive for password entry
+# Launch the server as the correct user, interactively
 sudo -u "$PZ_USER" bash -c "cd $PZ_SERVER_DIR && ./start-server.sh"
 
-# We assume the user has finished setting the password and stopped the server with Ctrl+C.
 echo -e "${GREEN}Initial password setup is assumed to be complete.${NC}"
-# Clean up the manual FIFO file
-rm "${PZ_SERVER_DIR}/zomboid.control"
 
 # --- 7. Optional Systemd Setup ---
 echo -e "${BLUE}[7/7] Optional: Setup server as a background service?${NC}"
@@ -102,9 +102,9 @@ read -p "Do you want to set up Project Zomboid with systemd for auto-start and s
 echo # Move to a new line
 
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo "Creating systemd service and socket files..."
+    echo "Creating systemd service and socket files for robust management..."
 
-    # Create the zomboid.service file with safe shutdown
+    # Create the zomboid.service file with safe shutdown and FIFO input
     cat >/etc/systemd/system/zomboid.service <<EOL
 [Unit]
 Description=Project Zomboid Server
@@ -144,6 +144,7 @@ EOL
     echo "Use 'systemctl status zomboid' to check it."
     echo "Use 'journalctl -u zomboid -f' to view live logs."
     echo "Use 'systemctl stop zomboid' for a safe shutdown."
+    echo "Send commands (e.g., 'help'): echo \"help\" | sudo tee /opt/pzserver/zomboid.control"
     echo -e "${GREEN}=======================================================${NC}"
 else
     echo -e "${YELLOW}==================== SETUP FINISHED ====================${NC}"
@@ -154,4 +155,4 @@ else
     echo -e "${YELLOW}=======================================================${NC}"
 fi
 
-echo -e "${GREEN}All done. APE TOGETHER STRONK!${NC}"```
+echo -e "${GREEN}All done. APE TOGETHER STRONK!${NC}"

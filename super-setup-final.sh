@@ -2,14 +2,18 @@
 #
 # ================================================================= #
 #       PROJECT ZOMBOID - APE TOGETHER STRONK SUPER SCRIPT      #
-#                 (Ape Lord Edition - Now more robust!)           #
+#                   (Ape God Edition - Final Form)                #
+# ================================================================= #
+# This script handles the complete setup and systemd integration    #
+# with FIFO support. It pre-configures memory and handles           #
+# non-interactive prompts and broken package dependencies.          #
 # ================================================================= #
 
 # --- Script Configuration ---
 PZ_USER="pzuser"
 PZ_PASSWORD="Supra1122"
 PZ_SERVER_DIR="/opt/pzserver"
-PZ_MEMORY="3g" 
+PZ_MEMORY="3g" # Use "768m" for 1GB RAM VMs, "3g" for 4GB RAM VMs, etc.
 
 # --- Colors for Output ---
 GREEN='\033[0;32m'
@@ -23,32 +27,35 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-echo -e "${BLUE}--- Starting Project Zomboid Server Super Setup (Ape Lord Mode) ---${NC}"
+echo -e "${BLUE}--- Starting Project Zomboid Server Super Setup (Ape God Mode) ---${NC}"
 
 # --- 1. System Preparation & Non-Interactive Setup ---
-echo -e "${BLUE}[1/8] Setting up non-interactive frontend...${NC}"
-# This prevents apt from asking interactive questions (like 'Which services to restart?')
+echo -e "${BLUE}[1/9] Setting up non-interactive frontend...${NC}"
 export DEBIAN_FRONTEND=noninteractive
 
-echo -e "${BLUE}[2/8] Preparing system and installing dependencies...${NC}"
+echo -e "${BLUE}[2/9] Updating package lists...${NC}"
 apt-get update -y
+
+# --- NEW STEP: Fix any pre-existing broken dependencies ---
+echo -e "${BLUE}[3/9] Attempting to fix any broken dependencies...${NC}"
+apt-get --fix-broken install -y
+
+echo -e "${BLUE}[4/9] Preparing system and installing core dependencies...${NC}"
 apt-get install -y software-properties-common
 add-apt-repository multiverse -y
 dpkg --add-architecture i386
 apt-get update -y
 echo -e "${GREEN}System preparation complete.${NC}"
 
-# --- 3. SteamCMD Installation ---
-echo -e "${BLUE}[3/8] Installing SteamCMD...${NC}"
-# Pre-accept the Steam license
+# --- 5. SteamCMD Installation ---
+echo -e "${BLUE}[5/9] Installing SteamCMD...${NC}"
 echo "steam steam/question select \"I AGREE\"" | debconf-set-selections
 echo "steam steam/license note ''" | debconf-set-selections
-# Install steamcmd, automatically saying 'yes'
 apt-get install -y steamcmd
-echo -e "${GREEN}SteamCMD installed.${NC}"
+echo -e "${GREEN}SteamCMD installed successfully.${NC}"
 
-# --- 4. Create Dedicated User & Directories ---
-echo -e "${BLUE}[4/8] Creating dedicated user ('$PZ_USER') and server directory...${NC}"
+# --- 6. Create Dedicated User & Directories ---
+echo -e "${BLUE}[6/9] Creating dedicated user ('$PZ_USER') and server directory...${NC}"
 if ! id "$PZ_USER" >/dev/null 2>&1; then
     useradd -m -s /bin/bash "$PZ_USER"
     echo "$PZ_USER:$PZ_PASSWORD" | chpasswd
@@ -58,8 +65,9 @@ mkdir -p "$PZ_SERVER_DIR"
 chown "$PZ_USER":"$PZ_USER" "$PZ_SERVER_DIR"
 echo -e "${GREEN}User and directory created.${NC}"
 
-# --- 5. Download Project Zomboid Server ---
-echo -e "${BLUE}[5/8] Downloading Project Zomboid server...${NC}"
+# --- 7. Download & Configure Project Zomboid Server ---
+echo -e "${BLUE}[7/9] Downloading and configuring Project Zomboid server...${NC}"
+# Create update script
 cat > "/home/$PZ_USER/update_zomboid.txt" <<EOL
 @ShutdownOnFailedCommand 1
 @NoPromptForPassword 1
@@ -69,12 +77,11 @@ app_update 380870 validate
 quit
 EOL
 chown "$PZ_USER":"$PZ_USER" "/home/$PZ_USER/update_zomboid.txt"
-sudo -u "$PZ_USER" /usr/games/steamcmd +runscript "/home/$PZ_USER/update_zomboid.txt"
-echo -e "${GREEN}Project Zomboid server downloaded.${NC}"
 
-# --- 6. Pre-configure Server Memory ---
-echo -e "${BLUE}[6/8] Pre-configuring server memory to ${PZ_MEMORY}...${NC}"
-# (The rest of the script for memory config, firewall, and systemd setup follows...)
+# Download the server
+sudo -u "$PZ_USER" /usr/games/steamcmd +runscript "/home/$PZ_USER/update_zomboid.txt"
+
+# Pre-configure memory
 cat > "${PZ_SERVER_DIR}/ProjectZomboid64.json" <<EOL
 {
 	"mainClass": "zombie/network/GameServer",
@@ -83,10 +90,10 @@ cat > "${PZ_SERVER_DIR}/ProjectZomboid64.json" <<EOL
 }
 EOL
 chown "$PZ_USER":"$PZ_USER" "${PZ_SERVER_DIR}/ProjectZomboid64.json"
-echo -e "${GREEN}Server memory configuration saved.${NC}"
+echo -e "${GREEN}Server downloaded and memory configured.${NC}"
 
-# --- 7. Configure OS Firewall (iptables) ---
-echo -e "${BLUE}[7/8] Configuring OS-level firewall (iptables)...${NC}"
+# --- 8. Configure OS Firewall (iptables) ---
+echo -e "${BLUE}[8/9] Configuring OS-level firewall (iptables)...${NC}"
 iptables -I INPUT 5 -p udp --dport 16261 -j ACCEPT
 iptables -I INPUT 6 -p udp --dport 8766 -j ACCEPT
 iptables -I INPUT 7 -p udp --dport 16262:16272 -j ACCEPT
@@ -94,8 +101,8 @@ apt-get install -y iptables-persistent
 netfilter-persistent save
 echo -e "${GREEN}iptables rules applied and made persistent.${NC}"
 
-# --- 8. Guided Manual First Run & Systemd Setup ---
-echo -e "${BLUE}[8/8] Final Manual Setup & Optional Service Installation...${NC}"
+# --- 9. Guided Manual First Run & Systemd Setup ---
+echo -e "${BLUE}[9/9] Final Manual Setup & Optional Service Installation...${NC}"
 echo -e "${YELLOW}==================== ATTENTION REQUIRED ====================${NC}"
 echo "The next step is to run the server ONCE to create the admin password."
 echo "I will run the command for you. You will see the server startup sequence."

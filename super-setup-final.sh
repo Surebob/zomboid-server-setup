@@ -1,18 +1,19 @@
 #!/bin/bash
 #
 # ================================================================= #
-#       PROJECT ZOMBOID - APE TOGETHER STRONK FINAL SUPER SCRIPT      #
-#                 (Verbose & Robust Edition)                          #
+#       PROJECT ZOMBOID - APE TOGETHER STRONK SUPER SCRIPT      #
+#                (Definitive Verbose & Robust Edition)              #
 # ================================================================= #
 # This single script handles the complete setup and optional        #
 # systemd integration with full FIFO support for a Project Zomboid  #
-# dedicated server. It shows all installation and download output.  #
+# dedicated server. It pre-configures memory for cloud VMs.         #
 # ================================================================= #
 
 # --- Script Configuration ---
 PZ_USER="pzuser"
 PZ_PASSWORD="Supra1122"
 PZ_SERVER_DIR="/opt/pzserver"
+PZ_MEMORY="3g" # Use "768m" for 1GB RAM VMs, "3g" for 4GB RAM VMs, etc.
 
 # --- Colors for Output ---
 GREEN='\033[0;32m'
@@ -26,10 +27,10 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-echo -e "${BLUE}--- Starting Project Zomboid Server Super Setup (Verbose Mode) ---${NC}"
+echo -e "${BLUE}--- Starting Project Zomboid Server Super Setup (Definitive Mode) ---${NC}"
 
 # --- 1. System Preparation ---
-echo -e "${BLUE}[1/7] Preparing system and installing dependencies...${NC}"
+echo -e "${BLUE}[1/8] Preparing system and installing dependencies...${NC}"
 apt-get update
 apt-get install -y software-properties-common
 add-apt-repository multiverse -y
@@ -38,15 +39,14 @@ apt-get update
 echo -e "${GREEN}System preparation complete.${NC}"
 
 # --- 2. SteamCMD Installation ---
-echo -e "${BLUE}[2/7] Installing SteamCMD (this may take a moment)...${NC}"
-# Pre-accept the Steam license to avoid interactive prompts
+echo -e "${BLUE}[2/8] Installing SteamCMD (this may take a moment)...${NC}"
 echo "steam steam/question select \"I AGREE\"" | debconf-set-selections
 echo "steam steam/license note ''" | debconf-set-selections
 apt-get install -y steamcmd
 echo -e "${GREEN}SteamCMD installed.${NC}"
 
 # --- 3. Create Dedicated User & Directories ---
-echo -e "${BLUE}[3/7] Creating dedicated user ('$PZ_USER') and server directory...${NC}"
+echo -e "${BLUE}[3/8] Creating dedicated user ('$PZ_USER') and server directory...${NC}"
 if ! id "$PZ_USER" >/dev/null 2>&1; then
     useradd -m -s /bin/bash "$PZ_USER"
     echo "$PZ_USER:$PZ_PASSWORD" | chpasswd
@@ -57,7 +57,7 @@ chown "$PZ_USER":"$PZ_USER" "$PZ_SERVER_DIR"
 echo -e "${GREEN}User and directory created.${NC}"
 
 # --- 4. Download Project Zomboid Server ---
-echo -e "${BLUE}[4/7] Downloading Project Zomboid server (this is the longest step)...${NC}"
+echo -e "${BLUE}[4/8] Downloading Project Zomboid server (this is the longest step)...${NC}"
 cat > "/home/$PZ_USER/update_zomboid.txt" <<EOL
 @ShutdownOnFailedCommand 1
 @NoPromptForPassword 1
@@ -67,12 +67,53 @@ app_update 380870 validate
 quit
 EOL
 chown "$PZ_USER":"$PZ_USER" "/home/$PZ_USER/update_zomboid.txt"
-# Run steamcmd as the dedicated user, showing all output
 sudo -u "$PZ_USER" /usr/games/steamcmd +runscript "/home/$PZ_USER/update_zomboid.txt"
 echo -e "${GREEN}Project Zomboid server downloaded.${NC}"
 
-# --- 5. Configure OS Firewall (iptables) ---
-echo -e "${BLUE}[5/7] Configuring OS-level firewall (iptables)...${NC}"
+# --- 5. Pre-configure Server Memory ---
+echo -e "${BLUE}[5/8] Pre-configuring server memory to ${PZ_MEMORY}...${NC}"
+cat > "${PZ_SERVER_DIR}/ProjectZomboid64.json" <<EOL
+{
+	"mainClass": "zombie/network/GameServer",
+	"classpath": [
+		"java/.",
+		"java/istack-commons-runtime.jar",
+		"java/jassimp.jar",
+		"java/javacord-2.0.17-shaded.jar",
+		"java/javax.activation-api.jar",
+		"java/jaxb-api.jar",
+		"java/jaxb-runtime.jar",
+		"java/lwjgl.jar",
+		"java/lwjgl-natives-linux.jar",
+		"java/lwjgl-glfw.jar",
+		"java/lwjgl-glfw-natives-linux.jar",
+		"java/lwjgl-jemalloc.jar",
+		"java/lwjgl-jemalloc-natives-linux.jar",
+		"java/lwjgl-opengl.jar",
+		"java/lwjgl-opengl-natives-linux.jar",
+		"java/lwjgl_util.jar",
+		"java/sqlite-jdbc-3.27.2.1.jar",
+		"java/trove-3.0.3.jar",
+		"java/uncommons-maths-1.2.3.jar",
+		"java/commons-compress-1.18.jar"
+	],
+	"vmArgs": [
+		"-Djava.awt.headless=true",
+		"-Xmx${PZ_MEMORY}",
+		"-Dzomboid.steam=1",
+		"-Dzomboid.znetlog=1",
+		"-Djava.library.path=linux64/:natives/",
+		"-Djava.security.egd=file:/dev/urandom",
+		"-XX:+UseZGC",
+		"-XX:-OmitStackTraceInFastThrow"
+	]
+}
+EOL
+chown "$PZ_USER":"$PZ_USER" "${PZ_SERVER_DIR}/ProjectZomboid64.json"
+echo -e "${GREEN}Server memory configuration saved.${NC}"
+
+# --- 6. Configure OS Firewall (iptables) ---
+echo -e "${BLUE}[6/8] Configuring OS-level firewall (iptables)...${NC}"
 iptables -I INPUT 5 -p udp --dport 16261 -j ACCEPT
 iptables -I INPUT 6 -p udp --dport 8766 -j ACCEPT
 iptables -I INPUT 7 -p udp --dport 16262:16272 -j ACCEPT
@@ -82,8 +123,8 @@ apt-get install -y iptables-persistent
 netfilter-persistent save
 echo -e "${GREEN}iptables rules applied and made persistent.${NC}"
 
-# --- 6. The Guided Manual First Run ---
-echo -e "${BLUE}[6/7] Starting server for initial password setup...${NC}"
+# --- 7. The Guided Manual First Run ---
+echo -e "${BLUE}[7/8] Starting server for initial password setup...${NC}"
 echo -e "${YELLOW}==================== ATTENTION REQUIRED ====================${NC}"
 echo -e "The server will now start. It is waiting for you to create a password for the 'admin' user."
 echo -e "Please type your desired admin password in the console below and press Enter. Then confirm it."
@@ -96,8 +137,8 @@ sudo -u "$PZ_USER" bash -c "cd $PZ_SERVER_DIR && ./start-server.sh"
 
 echo -e "${GREEN}Initial password setup is assumed to be complete.${NC}"
 
-# --- 7. Optional Systemd Setup ---
-echo -e "${BLUE}[7/7] Optional: Setup server as a background service?${NC}"
+# --- 8. Optional Systemd Setup ---
+echo -e "${BLUE}[8/8] Optional: Setup server as a background service?${NC}"
 read -p "Do you want to set up Project Zomboid with systemd for auto-start and safe shutdown? (y/n) " -n 1 -r
 echo # Move to a new line
 

@@ -2,11 +2,12 @@
 #
 # ================================================================= #
 #       PROJECT ZOMBOID - APE TOGETHER STRONK SUPER SCRIPT      #
-#                   (Ape God Edition - Final Form)                #
+#                 (Ape King Edition - Bigger Hammer)              #
 # ================================================================= #
 # This script handles the complete setup and systemd integration    #
 # with FIFO support. It pre-configures memory and handles           #
-# non-interactive prompts and broken package dependencies.          #
+# non-interactive prompts and aggressively cleans up broken         #
+# package dependencies before installation.                         #
 # ================================================================= #
 
 # --- Script Configuration ---
@@ -27,7 +28,13 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-echo -e "${BLUE}--- Starting Project Zomboid Server Super Setup (Ape God Mode) ---${NC}"
+echo -e "${BLUE}--- Starting Project Zomboid Server Super Setup (Ape King Mode) ---${NC}"
+
+# --- Wait for any existing apt processes to finish ---
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 ; do
+   echo -e "${YELLOW}Waiting for other package management processes to finish...${NC}"
+   sleep 5
+done
 
 # --- 1. System Preparation & Non-Interactive Setup ---
 echo -e "${BLUE}[1/9] Setting up non-interactive frontend...${NC}"
@@ -36,9 +43,11 @@ export DEBIAN_FRONTEND=noninteractive
 echo -e "${BLUE}[2/9] Updating package lists...${NC}"
 apt-get update -y
 
-# --- NEW STEP: Fix any pre-existing broken dependencies ---
-echo -e "${BLUE}[3/9] Attempting to fix any broken dependencies...${NC}"
+# --- THE BIGGER HAMMER: Forcefully clean up any broken state ---
+echo -e "${BLUE}[3/9] Forcefully cleaning up package manager state...${NC}"
 apt-get --fix-broken install -y
+# Find any leftover i386 packages and purge them
+dpkg -l | grep i386 | awk '{print $2}' | xargs sudo apt-get remove --purge --allow-remove-essential -y || echo "No leftover i386 packages to remove, or cleanup failed."
 
 echo -e "${BLUE}[4/9] Preparing system and installing core dependencies...${NC}"
 apt-get install -y software-properties-common
@@ -52,6 +61,12 @@ echo -e "${BLUE}[5/9] Installing SteamCMD...${NC}"
 echo "steam steam/question select \"I AGREE\"" | debconf-set-selections
 echo "steam steam/license note ''" | debconf-set-selections
 apt-get install -y steamcmd
+
+# Add a check to see if steamcmd actually installed
+if ! command -v /usr/games/steamcmd &> /dev/null; then
+    echo -e "${YELLOW}FATAL ERROR: SteamCMD installation failed. Exiting.${NC}"
+    exit 1
+fi
 echo -e "${GREEN}SteamCMD installed successfully.${NC}"
 
 # --- 6. Create Dedicated User & Directories ---
@@ -67,7 +82,6 @@ echo -e "${GREEN}User and directory created.${NC}"
 
 # --- 7. Download & Configure Project Zomboid Server ---
 echo -e "${BLUE}[7/9] Downloading and configuring Project Zomboid server...${NC}"
-# Create update script
 cat > "/home/$PZ_USER/update_zomboid.txt" <<EOL
 @ShutdownOnFailedCommand 1
 @NoPromptForPassword 1
@@ -77,11 +91,7 @@ app_update 380870 validate
 quit
 EOL
 chown "$PZ_USER":"$PZ_USER" "/home/$PZ_USER/update_zomboid.txt"
-
-# Download the server
 sudo -u "$PZ_USER" /usr/games/steamcmd +runscript "/home/$PZ_USER/update_zomboid.txt"
-
-# Pre-configure memory
 cat > "${PZ_SERVER_DIR}/ProjectZomboid64.json" <<EOL
 {
 	"mainClass": "zombie/network/GameServer",
